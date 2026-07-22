@@ -148,7 +148,7 @@ def generate_test_case(system_list_file, out_name, sim_location, template_name):
         except:
           ValueError
 
-    print('Unformatted test case for system {0} generated successfully.').format(available_sims[available_idx])
+    print('Unformatted test case for system {0} generated successfully.'.format(available_sims[available_idx]))
     available_idx += 1
 
   print('Generated unformatted test case for {0} systems in {1} minutes.'.format(len(available_sims), round((time.time() - start)/60, 2)))
