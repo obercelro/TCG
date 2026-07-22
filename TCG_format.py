@@ -1,8 +1,23 @@
+"""
+Data Loading and Formatting Engine for TCG.
+Utilizes the xlwings COM interface to inject styling, conditional formatting, and generate data tables within the final output artifact.
+"""
+
 import xlwings as xw
 import time
 import os
+from typing import List
 
-def format_test_case(test_case, sim_summaries, available_sims, template_name):
+def format_test_case(test_case: str, sim_summaries: List[str], available_sims: List[str], template_name: str) -> None:
+    """
+    Applies visual styling, QA templates, and metadata aggregations to the raw DataFrame outputs.
+
+    Args:
+        test_case (str): The absolute filepath to the unformatted pandas output file.
+        sim_summaries (List[str]): List of absolute filepaths to the original simulation summary files.
+        available_sims (List[str]): Correlating list of parsed system identifiers.
+        template_name (str): Configuration template to utilize for stylistic structure.
+    """
     start = time.time()
     excel_idx = 1
     available_idx = 0
@@ -10,23 +25,23 @@ def format_test_case(test_case, sim_summaries, available_sims, template_name):
 
     print('Beginning test case formatting and SIM summary transfer.')
 
-    # Combine operations into a single Excel instance to vastly improve speed
     with xw.App(visible=False) as app:
         tc = app.books.open(test_case)
         template = app.books.open(test_case_template)
         
-        # 1. Format all initial test cases
+        # Format all target test cases and configure tabs
         for sheet in tc.sheets:
             template.sheets['TEMPLATE'].range('1:5').copy(sheet.range('1:5'))
             sheet.range((4, 1)).api.Font.Bold = True
             sheet.range((4, 1)).api.Font.Underline = True
-            sheet.api.Tab.ColorIndex = 6 # Fixed 'fc' NameError here
+            sheet.api.Tab.ColorIndex = 6 
             
+            # Apply conditional QA formatting
             for cell in sheet.range('B6:B40'):
                 if cell.value == 'PENDING':
                     cell.color = '#FFFF00'
 
-        # 2. Add overall statistics page
+        # Construct dynamic aggregate statistics page
         stats_sheet = tc.sheets.add(name='TEST STATISTICS', before=tc.sheets[0])
         num_sims = str(len(available_sims))
         
@@ -38,14 +53,14 @@ def format_test_case(test_case, sim_summaries, available_sims, template_name):
         if len(stats_sheet.tables) == 0:
             stats_sheet.tables.add(stats_sheet.range(f'D1:L{num_sims}'), table_style_name='TableStyleLight8')
 
-        # 3. Pull over summary sheets
+        # Import relevant sub-sheets from legacy source systems
         print('Initial formatting finished, starting SIM summary transfer.')
         for sims in sim_summaries:
             sim = app.books.open(sims)
             identifier = available_sims[available_idx]
             sheet_names = [s.name for s in sim.sheets]
 
-            # Simplified logic checking
+            # Route sheet extraction based on legacy file structures
             if sims.endswith('.xls') or (len(sheet_names) > 1 and 'SIM Modes' in sheet_names):
                 copy_sheet = sim.sheets['SIM Modes']
             elif len(sheet_names) > 1 and 'DETAIL MODE DESCRIPTIONS' in sheet_names:
@@ -57,6 +72,7 @@ def format_test_case(test_case, sim_summaries, available_sims, template_name):
             else:
                 copy_sheet = sim.sheets[0]
 
+            # Load extracted metadata into finalized output
             copy_sheet.copy(after=tc.sheets[excel_idx], name=f'SIM {identifier}')
             tc.sheets[excel_idx].range((4, 1)).value = identifier
 
