@@ -139,14 +139,14 @@ def generate_test_case(system_list_file, out_name, sim_location, template_name):
       with pd.ExcelWriter(test_case, engine = 'openpyxl') as writer:
         try:
           result.to_excel(writer, sheet_name = sheet_name, index = False)
-        except:
-          ValueError
+        except ValueError as e:
+            print(f"Failed to write sheet {sheet_name}: {e}")
     else:
       with pd.ExcelWriter(test_case, mode = 'a', engine = 'openpyxl') as writer:
         try:
           result.to_excel(writer, sheet_name = sheet_name, index = False)
-        except:
-          ValueError
+        except ValueError as e:
+            print(f"Failed to write sheet {sheet_name}: {e}")
 
     print('Unformatted test case for system {0} generated successfully.'.format(available_sims[available_idx]))
     available_idx += 1
