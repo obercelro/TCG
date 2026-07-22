@@ -1,3 +1,8 @@
+"""
+Data Extraction and Transformation Engine for TCG.
+Parses legacy and unstructured Excel files, applies necessary transformations, and prepares raw DataFrames for the loading phase.
+"""
+
 import os
 import time
 import re
@@ -5,14 +10,26 @@ import pandas as pd
 import numpy as np
 from openpyxl.workbook.child import INVALID_TITLE_REGEX
 import xlwings as xw
+from typing import Tuple, List
 
-def get_identifiers(system_list_file, out_list=False):
+def get_identifiers(system_list_file: str, out_list: bool = False) -> Tuple[pd.DataFrame, str]:
+    """
+    Extract system identifiers and nomenclature from a raw input spreadsheet.
+    Dynamically searches for header locations to handle unstructured inputs.
+
+    Args:
+        system_list_file (str): Absolute path to the system list Excel file.
+        out_list (bool): Flag to trigger generation of an external text file of identifiers.
+
+    Returns:
+        Tuple[pd.DataFrame, str]: A tuple containing the cleaned DataFrame of systems and the base output directory string.
+    """
     system_info = pd.read_excel(system_list_file)
     output_path = os.path.dirname(system_list_file) + '\\'
 
     identifier_column, name_column = 0, 0
     
-    # Locate headers dynamically
+    # Locate headers dynamically to account for unstructured legacy data
     for index, row in system_info.iterrows():
         if 'Identifier' in row.values:
             identifier_column = row.index[row == 'Identifier'][0]
@@ -30,21 +47,34 @@ def get_identifiers(system_list_file, out_list=False):
                                   header=False, sep=' ', mode='a', lineterminator='')
     return systems, output_path
 
-def make_lists(systems, sim_location, template_name):
-    sim_summaries, available_summaries, unsupported_summaries = [], [], []
+def make_lists(systems: pd.DataFrame, sim_location: str, template_name: str) -> Tuple[List[str], List[str], pd.Series]:
+    """
+    Cross-reference available simulation files against the requested system list.
+
+    Args:
+        systems (pd.DataFrame): Cleaned DataFrame of systems and their identifiers.
+        sim_location (str): Directory path containing simulation library files.
+        template_name (str): The active template string dictating file validation logic.
+
+    Returns:
+        Tuple[List[str], List[str], pd.Series]: Lists of verified summary filepaths, available identifiers, and duplicated system names.
+    """
+    sim_summaries: list[str] = []
+    available_summaries: list[str] = []
+    unsupported_summaries: list[str] = []
 
     system_list = sorted(systems.iloc[:, 0].unique().tolist())
     
     check_names = systems['Full Name'].value_counts()
     duplicated_names = check_names[check_names > 1]
 
+    # Validate files based on template constraints
     if template_name == "Template 1":
         for file in sorted(os.scandir(sim_location), key=lambda e: e.name):
             if str(file.name)[11:16] in system_list:
                 sim_summaries.append(os.path.join(sim_location, file.name))
                 available_summaries.append(str(file.name)[11:16])
     else:
-        # Fixed nested loop duplicating entries
         for dirpath, dirnames, filenames in os.walk(sim_location):
             for filename in filenames:
                 if filename.endswith('.scn'):
@@ -57,7 +87,20 @@ def make_lists(systems, sim_location, template_name):
 
     return sim_summaries, available_summaries, duplicated_names
 
-def generate_test_case(system_list_file, out_name, sim_location, template_name):
+def generate_test_case(system_list_file: str, out_name: str, sim_location: str, template_name: str) -> Tuple[str, List[str], List[str]]:
+    """
+    The core extraction and transformation logic pipeline.
+    Parses disparate simulation files, cleans parameters, and constructs the raw output sheets.
+
+    Args:
+        system_list_file (str): Location of target system identifiers.
+        out_name (str): Desired base name for output file.
+        sim_location (str): Directory path of simulation libraries.
+        template_name (str): Active formatting template configuration.
+
+    Returns:
+        Tuple[str, List[str], List[str]]: The absolute path to the generated unformatted test case, the list of processed summaries, and verified simulator identifiers.
+    """
     template_location = os.path.join(os.path.dirname(__file__), f'{template_name}_Template.xlsx')
     test_case_template = pd.read_excel(template_location, sheet_name='TEMPLATE')
 
@@ -71,10 +114,11 @@ def generate_test_case(system_list_file, out_name, sim_location, template_name):
 
     test_case_path = os.path.join(out_path, f'{out_name}_test_case.xlsx')
     
-    # Open the ExcelWriter ONCE to avoid massive I/O bottlenecks
+    # Maintain a single open file buffer to optimize I/O overhead
     with pd.ExcelWriter(test_case_path, engine='openpyxl') as writer:
         
         for available_idx, sim in enumerate(sim_summaries):
+            # Extract data from COM interface for legacy .xls where modern parsers fail
             if sim.endswith('.xls'):
                 with xw.App(visible=False) as app:
                     simfile = app.books.open(sim)
@@ -83,8 +127,9 @@ def generate_test_case(system_list_file, out_name, sim_location, template_name):
                     simfile.close()
             else:
                 check_multiple_sheets = pd.ExcelFile(sim)
-                sheet_names = check_multiple_sheets.sheet_names # Fixed TypeError
+                sheet_names = check_multiple_sheets.sheet_names 
                 
+                # Dynamic sheet targeting based on varied file schemas
                 if len(sheet_names) > 1 and 'SIM Modes' in sheet_names:
                     system = pd.read_excel(sim, sheet_name='SIM Modes')
                 elif len(sheet_names) > 1 and 'DETAIL MODE DESCRIPTIONS' in sheet_names:
@@ -98,6 +143,7 @@ def generate_test_case(system_list_file, out_name, sim_location, template_name):
                 else:
                     system = pd.read_excel(sim)
 
+            # Iteratively clean orphaned rows until headers are properly aligned
             while system.filter(like='Mode Name').columns.size < 1 and not system.empty:
                 new_header = system.iloc[0]
                 system = system[1:]
@@ -107,8 +153,8 @@ def generate_test_case(system_list_file, out_name, sim_location, template_name):
             temp_test_case = test_case_template.copy()
             sim_cases_list = []
 
+            # Parameter Transformation Step
             for index, row in system.iterrows():
-                # Fixed infinite while loops here
                 if 'Parameter R' in row and pd.notna(row['Parameter R']):
                     temp = [row.filter(like='Mode Name').iloc[0]]
                     sim_cases_list.append(temp + ['PENDING'] + np.repeat('', len(test_case_template.columns)-2).tolist())
@@ -116,12 +162,12 @@ def generate_test_case(system_list_file, out_name, sim_location, template_name):
                     temp = [row.filter(like='Mode Name').iloc[0]]
                     sim_cases_list.append(temp + ['PENDING'] + np.repeat('', len(test_case_template.columns)-2).tolist())
             
-            # Replaced slow iterative appending with direct concat
             sim_cases = pd.DataFrame(sim_cases_list, columns=temp_test_case.columns, dtype=str)
 
             temp_test_case.iloc[2, 0] = available_sims[available_idx]
             result = pd.concat([temp_test_case, sim_cases])
 
+            # Formatting valid sheet titles
             sheet_name = systems.loc[systems['Identifier'] == available_sims[available_idx], 'Full Name'].iloc[0]
             sheet_name = re.sub(INVALID_TITLE_REGEX, '_', sheet_name)
             
