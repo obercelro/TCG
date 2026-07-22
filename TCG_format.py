@@ -34,30 +34,31 @@ def format_test_case(test_case, sim_summaries, available_sims, template_name):
 
   # Pull over the summary sheet for each simulation, and place them after their corresponding test case
   print('Initial formatting finished, starting SIM summary transfer.')
-  for sims in sim_summaries:
-    with xw.App(visible = False) as app:
-      sim = xw.Book(sims)
+  with xw.App(visible = False) as app:
       tc = xw.Book(test_case)
-      identifier = available_sims[available_idx]
+      for sims in sim_summaries:
+          sim = xw.Book(sims)
+          identifier = available_sims[available_idx]
 
-      # Conditionally move simulation summary pages based on their formatting and location in respective workbook
-      if sims.endswith('.xls') or len(sim.sheet_names) > 1 and 'SIM Modes' in sim.sheet_names:
-        sim.sheets['SIM Modes'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
-      elif len(sim.sheet_names) > 1 and 'DETAIL MODE DESCRIPTIONS' in sim.sheet_names:
-        sim.sheets['DETAIL MODE DESCRIPTIONS'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
-      elif identifier in sim.sheet_names:
-        sim.sheets[identifier].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
-      elif 'Specific Sheet Name' in sim.sheet_names:
-        sim.sheets['Param Sets'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
-      else:
-        sim.sheets[0].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
+          # Conditionally move simulation summary pages based on their formatting and location in respective workbook
+          if sims.endswith('.xls') or len(sim.sheet_names) > 1 and 'SIM Modes' in sim.sheet_names:
+            sim.sheets['SIM Modes'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
+          elif len(sim.sheet_names) > 1 and 'DETAIL MODE DESCRIPTIONS' in sim.sheet_names:
+            sim.sheets['DETAIL MODE DESCRIPTIONS'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
+          elif identifier in sim.sheet_names:
+            sim.sheets[identifier].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
+          elif 'Specific Sheet Name' in sim.sheet_names:
+            sim.sheets['Param Sets'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
+          else:
+            sim.sheets[0].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
 
-      # Add the correct identifier to the test case
-      tc.sheets[excel_idx].range(4,1).value = identifier
+          # Add the correct identifier to the test case
+          tc.sheets[excel_idx].range(4,1).value = identifier
 
-      print('{0} summary added; {0} test case finalized.'.format(identifier))
-      excel_idx += 2
-      available_idx += 1
+          print('{0} summary added; {0} test case finalized.'.format(identifier))
+          excel_idx += 2
+          available_idx += 1
+          sim.close()
 
       tc.save()
       tc.close()
