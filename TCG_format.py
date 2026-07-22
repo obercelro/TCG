@@ -1,66 +1,72 @@
 import xlwings as xw
-import time, os
+import time
+import os
 
 def format_test_case(test_case, sim_summaries, available_sims, template_name):
-  # Create starting variables
-  start = time.time()
-  excel_idx = 1
-  available_idx = 0
-  test_case_template = os.path.join(os.path.dirname(__file__), template_name + '_Template.xlsx')
+    start = time.time()
+    excel_idx = 1
+    available_idx = 0
+    test_case_template = os.path.join(os.path.dirname(__file__), f'{template_name}_Template.xlsx')
 
-  # Intiially format all test cases and add overall statistics page
-  with xw.App(visible = False) as app:
-    tc = xw.Book(test_case)
-    template = xw.Book(test_case_template)
-    print('Beginning intial test case formatting.')
+    print('Beginning test case formatting and SIM summary transfer.')
 
-    for sheet in tc.sheets:
-      template.sheets['TEMPLATE'].range('1:5').copy(tc.sheets[sheet].range('1:5'))
-      tc.sheets[sheet].range(4,1).api.Font.Bold = True
-      tc.sheets[sheet].range(4,1).api.Font.Underline = True
-      fc.sheets[sheet].api.Tab.ColorIndex = 6
-      for x in tc.sheets[sheet].range('B6:B40'):
-        if x.value == 'PENDING':
-          x.color = '#FFFF00'
+    # Combine operations into a single Excel instance to vastly improve speed
+    with xw.App(visible=False) as app:
+        tc = app.books.open(test_case)
+        template = app.books.open(test_case_template)
+        
+        # 1. Format all initial test cases
+        for sheet in tc.sheets:
+            template.sheets['TEMPLATE'].range('1:5').copy(sheet.range('1:5'))
+            sheet.range((4, 1)).api.Font.Bold = True
+            sheet.range((4, 1)).api.Font.Underline = True
+            sheet.api.Tab.ColorIndex = 6 # Fixed 'fc' NameError here
+            
+            for cell in sheet.range('B6:B40'):
+                if cell.value == 'PENDING':
+                    cell.color = '#FFFF00'
 
-    tc.sheets.add(name = 'Sheet1', before = tc.sheets[0])
-    template.sheets['TEST STATISTICS'].range('1:' + str(len(available_sims))).copy(tc.sheets['Sheet1'].range('1:' + str(len(available_sims))))
-    for col in ['A','B','C','M','N','O','P']:
-      tc.sheets[0].api.Columns(col).Hidden = True
-    if len(tc.sheets[0].tables) == 0: tbl = tc.sheets[0].tables.add(tc.sheets[0].range('D1:L' + str(len(available_sims))), table_style_name = 'TableStyleLight8')
-    tc.sheets[0].name = 'TEST STATISTICS'
-    tc.save()
-    tc.close()
+        # 2. Add overall statistics page
+        stats_sheet = tc.sheets.add(name='TEST STATISTICS', before=tc.sheets[0])
+        num_sims = str(len(available_sims))
+        
+        template.sheets['TEST STATISTICS'].range(f'1:{num_sims}').copy(stats_sheet.range(f'1:{num_sims}'))
+        
+        for col in ['A', 'B', 'C', 'M', 'N', 'O', 'P']:
+            stats_sheet.api.Columns(col).Hidden = True
+            
+        if len(stats_sheet.tables) == 0:
+            stats_sheet.tables.add(stats_sheet.range(f'D1:L{num_sims}'), table_style_name='TableStyleLight8')
 
-  # Pull over the summary sheet for each simulation, and place them after their corresponding test case
-  print('Initial formatting finished, starting SIM summary transfer.')
-  with xw.App(visible = False) as app:
-      tc = xw.Book(test_case)
-      for sims in sim_summaries:
-          sim = xw.Book(sims)
-          identifier = available_sims[available_idx]
+        # 3. Pull over summary sheets
+        print('Initial formatting finished, starting SIM summary transfer.')
+        for sims in sim_summaries:
+            sim = app.books.open(sims)
+            identifier = available_sims[available_idx]
+            sheet_names = [s.name for s in sim.sheets]
 
-          # Conditionally move simulation summary pages based on their formatting and location in respective workbook
-          if sims.endswith('.xls') or len(sim.sheet_names) > 1 and 'SIM Modes' in sim.sheet_names:
-            sim.sheets['SIM Modes'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
-          elif len(sim.sheet_names) > 1 and 'DETAIL MODE DESCRIPTIONS' in sim.sheet_names:
-            sim.sheets['DETAIL MODE DESCRIPTIONS'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
-          elif identifier in sim.sheet_names:
-            sim.sheets[identifier].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
-          elif 'Specific Sheet Name' in sim.sheet_names:
-            sim.sheets['Param Sets'].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
-          else:
-            sim.sheets[0].copy(after = tc.sheets[excel_idx], name = ('SIM ' + identifier))
+            # Simplified logic checking
+            if sims.endswith('.xls') or (len(sheet_names) > 1 and 'SIM Modes' in sheet_names):
+                copy_sheet = sim.sheets['SIM Modes']
+            elif len(sheet_names) > 1 and 'DETAIL MODE DESCRIPTIONS' in sheet_names:
+                copy_sheet = sim.sheets['DETAIL MODE DESCRIPTIONS']
+            elif identifier in sheet_names:
+                copy_sheet = sim.sheets[identifier]
+            elif 'Specific Sheet Name' in sheet_names:
+                copy_sheet = sim.sheets['Param Sets']
+            else:
+                copy_sheet = sim.sheets[0]
 
-          # Add the correct identifier to the test case
-          tc.sheets[excel_idx].range(4,1).value = identifier
+            copy_sheet.copy(after=tc.sheets[excel_idx], name=f'SIM {identifier}')
+            tc.sheets[excel_idx].range((4, 1)).value = identifier
 
-          print('{0} summary added; {0} test case finalized.'.format(identifier))
-          excel_idx += 2
-          available_idx += 1
-          sim.close()
+            print(f'{identifier} summary added; {identifier} test case finalized.')
+            excel_idx += 2
+            available_idx += 1
+            sim.close()
 
-      tc.save()
-      tc.close()
+        tc.save()
+        template.close()
+        tc.close()
 
-  print('Generated test case with {0} emitters in {1} minutes.'.format(len(available_sims), (time.time()-start)/60))
+    print(f'Generated test case with {len(available_sims)} emitters in {(time.time()-start)/60:.2f} minutes.')
